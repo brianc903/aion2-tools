@@ -5,6 +5,49 @@ const STORAGE_KEY = 'aion2_saved_usernames'
 const SUPPORT_CLASS = '治癒星'
 const DEFAULT_TEAM_NAMES = ['Team 1', 'Team 2']
 const SUBTEAM_LABELS = ['Subteam A', 'Subteam B']
+const DEFAULT_TEAM_TIME = '20:00'
+
+const padTwo = (num) => String(num).padStart(2, '0')
+
+const toInputDate = (date) => `${date.getFullYear()}-${padTwo(date.getMonth() + 1)}-${padTwo(date.getDate())}`
+
+const getUpcomingRaidWindow = () => {
+  const now = new Date()
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  let diff = (3 - start.getDay() + 7) % 7
+  if (diff === 0) {
+    diff = 7
+  }
+  start.setDate(start.getDate() + diff)
+
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+
+  return {
+    start,
+    end,
+    startInput: toInputDate(start),
+    endInput: toInputDate(end)
+  }
+}
+
+const formatDisplayDate = (value) => {
+  if (!value) {
+    return 'Date TBD'
+  }
+  const asDate = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(asDate.getTime())) {
+    return 'Date TBD'
+  }
+  return asDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+const formatDisplayDateTime = (dateValue, timeValue) => {
+  const datePart = formatDisplayDate(dateValue)
+  const timePart = timeValue && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue) ? timeValue : '--:--'
+  return `${datePart} • ${timePart}`
+}
 
 const uniqueId = (prefix = 'team') => {
   const safePrefix = prefix.toLowerCase().replace(/\s+/g, '-') || 'team'
@@ -36,6 +79,22 @@ const createTeamTemplate = (label) => {
 
 const createDefaultTeams = () => DEFAULT_TEAM_NAMES.map(name => createTeamTemplate(name))
 
+const initializeTeamSchedules = (teamList, defaultDate) => {
+  const map = {}
+  teamList.forEach(team => {
+    map[team.id] = defaultDate
+  })
+  return map
+}
+
+const initializeTeamTimes = (teamList, defaultTime) => {
+  const map = {}
+  teamList.forEach(team => {
+    map[team.id] = defaultTime
+  })
+  return map
+}
+
 const buildAssignmentsFromTeams = (teamList) => {
   const slots = {}
   teamList.forEach(team => {
@@ -49,6 +108,7 @@ const buildAssignmentsFromTeams = (teamList) => {
 }
 
 function App() {
+  const weekWindow = useMemo(() => getUpcomingRaidWindow(), [])
   const [username, setUsername] = useState('')
   const [server, setServer] = useState('露梅')
   const [characterList, setCharacterList] = useState([])
@@ -59,9 +119,15 @@ function App() {
   const [activeTab, setActiveTab] = useState('search')
   const initialTeams = useMemo(() => createDefaultTeams(), [])
   const [teams, setTeams] = useState(initialTeams)
+  const [teamSchedules, setTeamSchedules] = useState(() => initializeTeamSchedules(initialTeams, weekWindow.startInput))
+  const [teamTimes, setTeamTimes] = useState(() => initializeTeamTimes(initialTeams, DEFAULT_TEAM_TIME))
   const [teamAssignments, setTeamAssignments] = useState(() => buildAssignmentsFromTeams(initialTeams))
   const [showPveScores, setShowPveScores] = useState(true)
   const [showPreview, setShowPreview] = useState(false)
+  const windowLabel = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+    return `${formatter.format(weekWindow.start)} → ${formatter.format(weekWindow.end)}`
+  }, [weekWindow])
   const draggingMemberRef = useRef(null)
   const teamStats = useMemo(() => {
     const stats = {}
@@ -432,6 +498,42 @@ function App() {
     draggingMemberRef.current = null
   }
 
+  const clampDateToWindow = (value) => {
+    if (!value) {
+      return ''
+    }
+    if (value < weekWindow.startInput) {
+      return weekWindow.startInput
+    }
+    if (value > weekWindow.endInput) {
+      return weekWindow.endInput
+    }
+    return value
+  }
+
+  const handleScheduleChange = (teamId, value) => {
+    const nextValue = clampDateToWindow(value)
+    setTeamSchedules(prev => ({
+      ...prev,
+      [teamId]: nextValue
+    }))
+  }
+
+  const normalizeTimeValue = (value) => {
+    if (!value) {
+      return DEFAULT_TEAM_TIME
+    }
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : DEFAULT_TEAM_TIME
+  }
+
+  const handleTimeChange = (teamId, value) => {
+    const nextValue = normalizeTimeValue(value)
+    setTeamTimes(prev => ({
+      ...prev,
+      [teamId]: nextValue
+    }))
+  }
+
   const handleRemoveFromSlot = (slotId) => {
     setTeamAssignments(prev => ({
       ...prev,
@@ -451,6 +553,14 @@ function App() {
       setTeamAssignments(prevAssignments => ({
         ...prevAssignments,
         ...buildAssignmentsFromTeams([newTeam])
+      }))
+      setTeamSchedules(prevSchedules => ({
+        ...prevSchedules,
+        [newTeam.id]: weekWindow.startInput
+      }))
+      setTeamTimes(prevTimes => ({
+        ...prevTimes,
+        [newTeam.id]: DEFAULT_TEAM_TIME
       }))
       return [...prevTeams, newTeam]
     })
@@ -474,6 +584,16 @@ function App() {
           delete updated[slot.id]
         })
       })
+      return updated
+    })
+    setTeamSchedules(prev => {
+      const updated = { ...prev }
+      delete updated[teamId]
+      return updated
+    })
+    setTeamTimes(prev => {
+      const updated = { ...prev }
+      delete updated[teamId]
       return updated
     })
   }
@@ -662,6 +782,9 @@ function App() {
               <p className="team-hint">
                 Drag characters into each slot. Every squad needs 3 DPS and 1 治癒星 support.
               </p>
+              <p className="team-window-note">
+                Upcoming window: {windowLabel} (Wed → Tue only)
+              </p>
             </div>
             <div className="team-section-actions">
               <button
@@ -761,7 +884,30 @@ function App() {
                           </button>
                         )}
                       </div>
-                      <span className="team-card-meta">8 slots • 2 sub-teams</span>
+                      <div className="team-card-meta">
+                        <span>8 slots • 2 sub-teams</span>
+                        <div className="team-date-time-row">
+                          <label className="team-date-picker">
+                            <span>Run date (Wed → Tue)</span>
+                            <input
+                              type="date"
+                              value={teamSchedules[team.id] || ''}
+                              min={weekWindow.startInput}
+                              max={weekWindow.endInput}
+                              onChange={(event) => handleScheduleChange(team.id, event.target.value)}
+                            />
+                          </label>
+                          <label className="team-time-picker">
+                            <span>Start time</span>
+                            <input
+                              type="time"
+                              step="900"
+                              value={teamTimes[team.id] || DEFAULT_TEAM_TIME}
+                              onChange={(event) => handleTimeChange(team.id, event.target.value)}
+                            />
+                          </label>
+                        </div>
+                      </div>
                     </div>
                     <div className="subteam-grid">
                       {team.subteams.map(subteam => {
@@ -843,15 +989,19 @@ function App() {
               <div>
                 <h2>👀 Team Preview</h2>
                 <p>All squads on a single page. Click any empty slot to jump back and fill it.</p>
+                <p className="preview-window-note">Window: {windowLabel}</p>
               </div>
               <button className="secondary" onClick={() => setShowPreview(false)}>
                 Close
               </button>
             </div>
-            <div className="preview-grid">
+            <div className={`preview-grid ${teams.length <= 2 ? 'preview-grid--loose' : ''}`}>
               {teams.map(team => (
                 <div key={team.id} className="preview-team">
-                  <h3>{team.name}</h3>
+                  <div className="preview-team-heading">
+                    <h3>{team.name}</h3>
+                    <span className="preview-team-date">{formatDisplayDateTime(teamSchedules[team.id], teamTimes[team.id])}</span>
+                  </div>
                   <div className="preview-subteams">
                     {team.subteams.map(subteam => (
                       <div key={subteam.id} className="preview-subteam">
