@@ -36,7 +36,8 @@ label {
   font-size: 0.9rem;
 }
 
-input {
+input,
+textarea {
   width: 100%;
   padding: 8px 10px;
   border: 2px solid #e0e0e0;
@@ -45,9 +46,15 @@ input {
   transition: border-color 0.3s;
 }
 
-input:focus {
+input:focus,
+textarea:focus {
   outline: none;
   border-color: #667eea;
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
 }
 
 .button-group {

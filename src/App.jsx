@@ -61,6 +61,29 @@ const toNumericScore = (value) => {
   return NaN
 }
 
+const parseCharacterNames = (raw) => {
+  if (!raw || !raw.trim()) {
+    return []
+  }
+
+  const names = raw
+    .split(/\r?\n/)
+    .map(name => name.trim())
+    .filter(Boolean)
+
+  const unique = []
+  const seen = new Set()
+
+  names.forEach(name => {
+    if (!seen.has(name)) {
+      seen.add(name)
+      unique.push(name)
+    }
+  })
+
+  return unique
+}
+
 const uniqueId = (prefix = 'team') => {
   const safePrefix = prefix.toLowerCase().replace(/\s+/g, '-') || 'team'
   return `${safePrefix}-${Math.random().toString(36).slice(2, 7)}-${Date.now().toString(36)}`
@@ -267,22 +290,27 @@ function App() {
 
   // Add character to search list
   const addCharacter = () => {
-    if (!username.trim()) {
-      setError('Please enter a username')
+    const names = parseCharacterNames(username)
+
+    if (names.length === 0) {
+      setError('Please enter at least one character name')
       return
     }
 
-    // Check if character already exists in list
-    const exists = characterList.some(
-      char => char.username === username && char.server === server
+    const existingSet = new Set(
+      characterList.map(char => `${char.username}::${char.server}`)
     )
 
-    if (exists) {
-      setError('Character already in the list')
+    const newCharacters = names
+      .filter(name => !existingSet.has(`${name}::${server}`))
+      .map(name => ({ username: name, server }))
+
+    if (newCharacters.length === 0) {
+      setError('All characters are already in the list')
       return
     }
 
-    setCharacterList([...characterList, { username, server }])
+    setCharacterList(prev => [...prev, ...newCharacters])
     setUsername('')
     setError(null)
   }
@@ -695,14 +723,14 @@ function App() {
             <form onSubmit={handleSubmit}>
               <div className="input-group">
                 <div className="input-field">
-                  <label htmlFor="username">Character Name</label>
-                  <input
+                  <label htmlFor="username">Character Names</label>
+                  <textarea
                     id="username"
-                    type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Enter character name"
+                    placeholder="Enter one character name per line"
                     disabled={loading}
+                    rows={4}
                   />
                 </div>
                 <div className="input-field">
