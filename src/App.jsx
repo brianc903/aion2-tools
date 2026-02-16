@@ -191,7 +191,7 @@ function App() {
     const existing = savedUsernames.filter(
       item => !(item.username === name && item.server === srv)
     )
-    const updated = [newEntry, ...existing].slice(0, 10) // Keep only last 10
+    const updated = [newEntry, ...existing].slice(0, 100)
     setSavedUsernames(updated)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
   }
@@ -209,7 +209,7 @@ function App() {
     })
     
     // Add new entries at the beginning
-    const updated = [...newEntries, ...existing].slice(0, 10) // Keep only last 10
+    const updated = [...newEntries, ...existing].slice(0, 100)
     setSavedUsernames(updated)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
   }
