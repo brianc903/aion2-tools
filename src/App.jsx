@@ -330,7 +330,7 @@ function App() {
   const fetchSingleCharacter = async (name, srv) => {
     const encodedName = encodeURIComponent(name)
     const encodedServer = encodeURIComponent(srv)
-    const apiUrl = `https://aion-api.bnshive.com/character/query?name=${encodedName}&server=${encodedServer}`
+    const apiUrl = `https://aion-api.bnshive.com/character/query?name=${encodedName}&server=${encodedServer}&refresh=true`
 
     const response = await fetch(apiUrl)
 
