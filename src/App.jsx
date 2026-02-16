@@ -49,6 +49,18 @@ const formatDisplayDateTime = (dateValue, timeValue) => {
   return `${datePart} • ${timePart}`
 }
 
+const toNumericScore = (value) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : NaN
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '')
+    const parsed = parseFloat(cleaned)
+    return Number.isNaN(parsed) ? NaN : parsed
+  }
+  return NaN
+}
+
 const uniqueId = (prefix = 'team') => {
   const safePrefix = prefix.toLowerCase().replace(/\s+/g, '-') || 'team'
   return `${safePrefix}-${Math.random().toString(36).slice(2, 7)}-${Date.now().toString(36)}`
@@ -137,10 +149,15 @@ function App() {
         const dpsMembers = subteam.slots
           .filter(slot => slot.role === 'dps')
           .map(slot => teamAssignments[slot.id])
-          .filter(member => member && !Number.isNaN(parseFloat(member.pveScore)))
+          .filter(member => {
+            if (!member) {
+              return false
+            }
+            return !Number.isNaN(toNumericScore(member.pveScore))
+          })
 
         if (dpsMembers.length > 0) {
-          const total = dpsMembers.reduce((sum, member) => sum + parseFloat(member.pveScore), 0)
+          const total = dpsMembers.reduce((sum, member) => sum + (toNumericScore(member.pveScore) || 0), 0)
           stats[team.id][subteam.id] = {
             count: dpsMembers.length,
             average: total / dpsMembers.length
@@ -405,7 +422,7 @@ function App() {
   }
 
   const rosterMembers = useMemo(() => {
-    return characterDataList
+    const members = characterDataList
       .map(extractCharacterDetails)
       .filter(details => !details.error && details.className && details.className !== 'N/A')
       .map(details => ({
@@ -416,6 +433,19 @@ function App() {
         pveScore: details.pveScore,
         role: details.className === SUPPORT_CLASS ? 'support' : 'dps'
       }))
+
+    members.sort((a, b) => {
+      const scoreA = toNumericScore(a.pveScore)
+      const scoreB = toNumericScore(b.pveScore)
+      const aInvalid = Number.isNaN(scoreA)
+      const bInvalid = Number.isNaN(scoreB)
+      if (aInvalid && bInvalid) return 0
+      if (aInvalid) return 1
+      if (bInvalid) return -1
+      return scoreB - scoreA
+    })
+
+    return members
   }, [characterDataList])
 
   useEffect(() => {
