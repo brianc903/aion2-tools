@@ -1,7 +1,52 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import './App.css'
 
 const STORAGE_KEY = 'aion2_saved_usernames'
+const SUPPORT_CLASS = '治癒星'
+const DEFAULT_TEAM_NAMES = ['Team 1', 'Team 2']
+const SUBTEAM_LABELS = ['Subteam A', 'Subteam B']
+
+const uniqueId = (prefix = 'team') => {
+  const safePrefix = prefix.toLowerCase().replace(/\s+/g, '-') || 'team'
+  return `${safePrefix}-${Math.random().toString(36).slice(2, 7)}-${Date.now().toString(36)}`
+}
+
+const createSubteamTemplate = (teamBaseId, label, index) => {
+  const subId = `${teamBaseId}-sub-${index + 1}`
+  return {
+    id: subId,
+    name: label,
+    slots: [
+      { id: `${subId}-dps-1`, label: 'DPS 1', role: 'dps' },
+      { id: `${subId}-dps-2`, label: 'DPS 2', role: 'dps' },
+      { id: `${subId}-dps-3`, label: 'DPS 3', role: 'dps' },
+      { id: `${subId}-support`, label: 'Support', role: 'support' }
+    ]
+  }
+}
+
+const createTeamTemplate = (label) => {
+  const baseId = uniqueId(label)
+  return {
+    id: baseId,
+    name: label,
+    subteams: SUBTEAM_LABELS.map((subLabel, index) => createSubteamTemplate(baseId, subLabel, index))
+  }
+}
+
+const createDefaultTeams = () => DEFAULT_TEAM_NAMES.map(name => createTeamTemplate(name))
+
+const buildAssignmentsFromTeams = (teamList) => {
+  const slots = {}
+  teamList.forEach(team => {
+    team.subteams.forEach(subteam => {
+      subteam.slots.forEach(slot => {
+        slots[slot.id] = null
+      })
+    })
+  })
+  return slots
+}
 
 function App() {
   const [username, setUsername] = useState('')
@@ -11,6 +56,39 @@ function App() {
   const [error, setError] = useState(null)
   const [characterDataList, setCharacterDataList] = useState([])
   const [savedUsernames, setSavedUsernames] = useState([])
+  const [activeTab, setActiveTab] = useState('search')
+  const initialTeams = useMemo(() => createDefaultTeams(), [])
+  const [teams, setTeams] = useState(initialTeams)
+  const [teamAssignments, setTeamAssignments] = useState(() => buildAssignmentsFromTeams(initialTeams))
+  const [showPveScores, setShowPveScores] = useState(true)
+  const [showPreview, setShowPreview] = useState(false)
+  const draggingMemberRef = useRef(null)
+  const teamStats = useMemo(() => {
+    const stats = {}
+    teams.forEach(team => {
+      stats[team.id] = {}
+      team.subteams.forEach(subteam => {
+        const dpsMembers = subteam.slots
+          .filter(slot => slot.role === 'dps')
+          .map(slot => teamAssignments[slot.id])
+          .filter(member => member && !Number.isNaN(parseFloat(member.pveScore)))
+
+        if (dpsMembers.length > 0) {
+          const total = dpsMembers.reduce((sum, member) => sum + parseFloat(member.pveScore), 0)
+          stats[team.id][subteam.id] = {
+            count: dpsMembers.length,
+            average: total / dpsMembers.length
+          }
+        } else {
+          stats[team.id][subteam.id] = {
+            count: 0,
+            average: null
+          }
+        }
+      })
+    })
+    return stats
+  }, [teams, teamAssignments])
 
   // Load saved usernames from localStorage on mount
   useEffect(() => {
@@ -260,159 +338,553 @@ function App() {
     }
   }
 
+  const rosterMembers = useMemo(() => {
+    return characterDataList
+      .map(extractCharacterDetails)
+      .filter(details => !details.error && details.className && details.className !== 'N/A')
+      .map(details => ({
+        id: `${details.name}-${details.server}`,
+        name: details.name,
+        server: details.server,
+        className: details.className,
+        pveScore: details.pveScore,
+        role: details.className === SUPPORT_CLASS ? 'support' : 'dps'
+      }))
+  }, [characterDataList])
+
+  useEffect(() => {
+    setTeamAssignments(prev => {
+      let changed = false
+      const updated = { ...prev }
+      Object.entries(updated).forEach(([slotId, member]) => {
+        if (member && !rosterMembers.some(rosterMember => rosterMember.id === member.id)) {
+          updated[slotId] = null
+          changed = true
+        }
+      })
+      return changed ? updated : prev
+    })
+  }, [rosterMembers])
+
+  const assignedIds = new Set(
+    Object.values(teamAssignments)
+      .filter(Boolean)
+      .map(member => member.id)
+  )
+
+  const hasAssignments = assignedIds.size > 0
+
+  const availableDps = rosterMembers.filter(member => member.role === 'dps' && !assignedIds.has(member.id))
+  const availableSupport = rosterMembers.filter(member => member.role === 'support' && !assignedIds.has(member.id))
+
+  const handleDragStart = (event, member) => {
+    draggingMemberRef.current = member
+    event.dataTransfer.setData('application/json', JSON.stringify({ member }))
+    event.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragEnd = () => {
+    draggingMemberRef.current = null
+  }
+
+  const handleDragOver = (event, slotRole) => {
+    const member = draggingMemberRef.current
+    if (!member || member.role !== slotRole) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDrop = (event, slotId, slotRole) => {
+    const draggedMember = draggingMemberRef.current
+    const payload = event.dataTransfer.getData('application/json')
+    let parsedMember = draggedMember
+
+    if (!parsedMember && payload) {
+      try {
+        const data = JSON.parse(payload)
+        parsedMember = data.member
+      } catch (e) {
+        // Ignore malformed payloads
+      }
+    }
+
+    if (!parsedMember || parsedMember.role !== slotRole) {
+      return
+    }
+
+    event.preventDefault()
+
+    const memberToAssign = parsedMember
+
+    setTeamAssignments(prev => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(key => {
+        if (updated[key]?.id === memberToAssign.id) {
+          updated[key] = null
+        }
+      })
+      updated[slotId] = memberToAssign
+      return updated
+    })
+
+    draggingMemberRef.current = null
+  }
+
+  const handleRemoveFromSlot = (slotId) => {
+    setTeamAssignments(prev => ({
+      ...prev,
+      [slotId]: null
+    }))
+  }
+
+  const resetTeams = () => {
+    setTeamAssignments(buildAssignmentsFromTeams(teams))
+  }
+
+  const handleAddTeam = () => {
+    setTeams(prevTeams => {
+      const nextIndex = prevTeams.length
+      const label = DEFAULT_TEAM_NAMES[nextIndex] || `Team ${nextIndex + 1}`
+      const newTeam = createTeamTemplate(label)
+      setTeamAssignments(prevAssignments => ({
+        ...prevAssignments,
+        ...buildAssignmentsFromTeams([newTeam])
+      }))
+      return [...prevTeams, newTeam]
+    })
+  }
+
+  const handleRemoveTeam = (teamId) => {
+    if (teams.length <= 1) {
+      return
+    }
+
+    const teamToRemove = teams.find(team => team.id === teamId)
+    if (!teamToRemove) {
+      return
+    }
+
+    setTeams(prev => prev.filter(team => team.id !== teamId))
+    setTeamAssignments(prev => {
+      const updated = { ...prev }
+      teamToRemove.subteams.forEach(subteam => {
+        subteam.slots.forEach(slot => {
+          delete updated[slot.id]
+        })
+      })
+      return updated
+    })
+  }
+
   return (
     <div className="app">
       <h1>🎮 Aion2 Character Search</h1>
 
-      {savedUsernames.length > 0 && (
-        <div className="saved-usernames">
-          <h3>📋 Saved Searches:</h3>
-          <div className="username-pills">
-            {savedUsernames.map((item, index) => (
-              <div 
-                key={index} 
-                className="username-pill"
-                onClick={() => loadUsername(item.username, item.server)}
-              >
-                <span>{item.username} ({item.server})</span>
-                <button 
-                  className="remove-btn"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removeUsername(item.username, item.server)
-                  }}
-                  title="Remove"
+      <div className="tab-bar">
+        <button
+          className={`tab-button ${activeTab === 'search' ? 'active' : ''}`}
+          onClick={() => setActiveTab('search')}
+        >
+          🔍 Search
+        </button>
+        <button
+          className={`tab-button ${activeTab === 'dungeon' ? 'active' : ''}`}
+          onClick={() => setActiveTab('dungeon')}
+          disabled={characterDataList.length === 0}
+        >
+          🛡️ Dungeon Teams
+        </button>
+      </div>
+
+      {activeTab === 'search' && (
+        <>
+          {savedUsernames.length > 0 && (
+            <div className="saved-usernames">
+              <h3>📋 Saved Searches:</h3>
+              <div className="username-pills">
+                {savedUsernames.map((item, index) => (
+                  <div
+                    key={index}
+                    className="username-pill"
+                    onClick={() => loadUsername(item.username, item.server)}
+                  >
+                    <span>{item.username} ({item.server})</span>
+                    <button
+                      className="remove-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeUsername(item.username, item.server)
+                      }}
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="button-group" style={{ marginTop: '8px' }}>
+                <button
+                  onClick={searchSavedUsernames}
+                  disabled={loading}
                 >
-                  ×
+                  {loading ? 'Searching...' : '🔍 Search All Saved'}
+                </button>
+                <button
+                  className="secondary"
+                  onClick={clearAllUsernames}
+                >
+                  Clear All
                 </button>
               </div>
-            ))}
+            </div>
+          )}
+
+          <div className="search-section">
+            <form onSubmit={handleSubmit}>
+              <div className="input-group">
+                <div className="input-field">
+                  <label htmlFor="username">Character Name</label>
+                  <input
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Enter character name"
+                    disabled={loading}
+                  />
+                </div>
+                <div className="input-field">
+                  <label htmlFor="server">Server</label>
+                  <input
+                    id="server"
+                    type="text"
+                    value={server}
+                    onChange={(e) => setServer(e.target.value)}
+                    placeholder="Enter server name"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+              <div className="button-group">
+                <button type="submit" disabled={loading}>
+                  ➕ Add Character
+                </button>
+              </div>
+            </form>
+
+            {characterList.length > 0 && (
+              <div className="character-queue">
+                <h3>📝 Characters to Search ({characterList.length}):</h3>
+                <div className="queue-list">
+                  {characterList.map((char, index) => (
+                    <div key={index} className="queue-item">
+                      <span className="queue-name">{char.username}</span>
+                      <span className="queue-server">({char.server})</span>
+                      <button
+                        className="remove-btn"
+                        onClick={() => removeFromList(index)}
+                        title="Remove"
+                        disabled={loading}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="button-group" style={{ marginTop: '10px' }}>
+                  <button onClick={handleSearch} disabled={loading}>
+                    {loading ? 'Searching...' : '🔍 Search All Characters'}
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={clearCharacterList}
+                    disabled={loading}
+                  >
+                    Clear List
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="button-group" style={{ marginTop: '8px' }}>
-            <button 
-              onClick={searchSavedUsernames}
-              disabled={loading}
-            >
-              {loading ? 'Searching...' : '🔍 Search All Saved'}
-            </button>
-            <button 
-              className="secondary" 
-              onClick={clearAllUsernames}
-            >
-              Clear All
-            </button>
+
+          {loading && <div className="loading">Loading character data...</div>}
+
+          {error && <div className="error">❌ Error: {error}</div>}
+
+          {characterDataList.length > 0 && (
+            <div className="results-section">
+              <h2 style={{ marginBottom: '10px', color: '#333', fontSize: '1rem' }}>
+                📊 Results ({characterDataList.length} character{characterDataList.length > 1 ? 's' : ''})
+              </h2>
+              {characterDataList.map((charData, index) => {
+                const details = extractCharacterDetails(charData)
+                return (
+                  <div key={index} className={`character-card ${details.error ? 'error-card' : ''}`}>
+                    <h2>
+                      {details.name}
+                      <span className="server-badge">{details.server}</span>
+                    </h2>
+                    {details.error ? (
+                      <div className="error" style={{ margin: '10px 0' }}>
+                        ⚠️ {details.error}
+                      </div>
+                    ) : (
+                      <div className="character-details">
+                        <div className="detail-item">
+                          <div className="detail-label">Class</div>
+                          <div className="detail-value">{details.className}</div>
+                        </div>
+                        <div className="detail-item">
+                          <div className="detail-label">Item Level</div>
+                          <div className="detail-value">{details.itemLevel}</div>
+                        </div>
+                        <div className="detail-item">
+                          <div className="detail-label">PVE Score</div>
+                          <div className="detail-value">{details.pveScore}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'dungeon' && (
+        <div className="team-section">
+          <div className="team-section-header">
+            <div>
+              <h2>🛡️ Weekly Dungeon Planner</h2>
+              <p className="team-hint">
+                Drag characters into each slot. Every squad needs 3 DPS and 1 治癒星 support.
+              </p>
+            </div>
+            <div className="team-section-actions">
+              <button
+                className={showPveScores ? 'secondary' : ''}
+                onClick={() => setShowPveScores(prev => !prev)}
+              >
+                {showPveScores ? 'Hide PVE Scores' : 'Show PVE Scores'}
+              </button>
+              <button className="secondary" onClick={() => setShowPreview(true)}>
+                👀 Preview Layout
+              </button>
+              <button onClick={handleAddTeam}>
+                ➕ Add Team
+              </button>
+              <button className="secondary" onClick={resetTeams} disabled={!hasAssignments}>
+                Reset Teams
+              </button>
+            </div>
           </div>
+
+          {rosterMembers.length === 0 ? (
+            <div className="empty-roster">
+              Run a search on the 🔍 tab to populate your roster before assigning teams.
+            </div>
+          ) : (
+            <div className="team-layout">
+              <div className="roster-panel">
+                <div className="roster-group">
+                  <div className="roster-group-header">
+                    <h3>⚔️ DPS ({availableDps.length})</h3>
+                    <span>Non-治癒星 classes</span>
+                  </div>
+                  <div className="roster-grid">
+                    {availableDps.map(member => (
+                      <div
+                        key={member.id}
+                        className="roster-card dps"
+                        draggable
+                        onDragStart={(event) => handleDragStart(event, member)}
+                        onDragEnd={handleDragEnd}
+                      >
+                        <div className="roster-name">{member.name}</div>
+                        <div className="roster-meta">
+                          <span>{member.className}</span>
+                          {showPveScores && <span>PVE {member.pveScore}</span>}
+                        </div>
+                      </div>
+                    ))}
+                    {availableDps.length === 0 && (
+                      <div className="roster-empty">All DPS are already assigned.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="roster-group">
+                  <div className="roster-group-header">
+                    <h3>💚 Support ({availableSupport.length})</h3>
+                    <span>治癒星 only</span>
+                  </div>
+                  <div className="roster-grid">
+                    {availableSupport.map(member => (
+                      <div
+                        key={member.id}
+                        className="roster-card support"
+                        draggable
+                        onDragStart={(event) => handleDragStart(event, member)}
+                        onDragEnd={handleDragEnd}
+                      >
+                        <div className="roster-name">{member.name}</div>
+                        <div className="roster-meta">
+                          <span>{member.className}</span>
+                          {showPveScores && <span>PVE {member.pveScore}</span>}
+                        </div>
+                      </div>
+                    ))}
+                    {availableSupport.length === 0 && (
+                      <div className="roster-empty">No free supports available.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="teams-panel">
+                {teams.map(team => (
+                  <div key={team.id} className="team-card">
+                    <div className="team-card-header">
+                      <div className="team-card-title">
+                        <h3>{team.name}</h3>
+                        {teams.length > 1 && (
+                          <button
+                            className="team-remove"
+                            onClick={() => handleRemoveTeam(team.id)}
+                            disabled={teams.length <= 1}
+                            aria-label={`Remove ${team.name}`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      <span className="team-card-meta">8 slots • 2 sub-teams</span>
+                    </div>
+                    <div className="subteam-grid">
+                      {team.subteams.map(subteam => {
+                        const stats = teamStats[team.id]?.[subteam.id] || { average: null }
+                        return (
+                          <div key={subteam.id} className="subteam-card">
+                            <div className="subteam-header">
+                              <div className="subteam-title">
+                                <h4>{subteam.name}</h4>
+                              </div>
+                              <div className="subteam-meta">
+                                <span>3 DPS + 1 Support</span>
+                                {showPveScores && (
+                                  <span className="team-avg">
+                                    Avg DPS PVE: {stats.average !== null ? Math.round(stats.average).toLocaleString() : '--'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="slot-grid">
+                              {subteam.slots.map(slot => {
+                                const occupant = teamAssignments[slot.id]
+                                return (
+                                  <div
+                                    key={slot.id}
+                                    className={`team-slot ${slot.role} ${occupant ? 'filled' : ''}`}
+                                    onDragOver={(event) => handleDragOver(event, slot.role)}
+                                    onDrop={(event) => handleDrop(event, slot.id, slot.role)}
+                                  >
+                                    {occupant ? (
+                                      <div
+                                        className="slot-member"
+                                        draggable
+                                        onDragStart={(event) => handleDragStart(event, occupant)}
+                                        onDragEnd={handleDragEnd}
+                                      >
+                                        <div className="slot-name">{occupant.name}</div>
+                                        <div className="slot-meta">
+                                          <span>{occupant.className}</span>
+                                          {showPveScores && <span>PVE {occupant.pveScore}</span>}
+                                        </div>
+                                        <button
+                                          className="slot-remove"
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            handleRemoveFromSlot(slot.id)
+                                          }}
+                                          aria-label="Remove from slot"
+                                        >
+                                          ×
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="slot-placeholder">
+                                        {slot.label}
+                                        <span className="slot-role-label">{slot.role === 'support' ? 'Support' : 'DPS'}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="search-section">
-        <form onSubmit={handleSubmit}>
-          <div className="input-group">
-            <div className="input-field">
-              <label htmlFor="username">Character Name</label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter character name"
-                disabled={loading}
-              />
+      {showPreview && (
+        <div className="preview-overlay" onClick={() => setShowPreview(false)}>
+          <div className="preview-content" onClick={(event) => event.stopPropagation()}>
+            <div className="preview-header">
+              <div>
+                <h2>👀 Team Preview</h2>
+                <p>All squads on a single page. Click any empty slot to jump back and fill it.</p>
+              </div>
+              <button className="secondary" onClick={() => setShowPreview(false)}>
+                Close
+              </button>
             </div>
-            <div className="input-field">
-              <label htmlFor="server">Server</label>
-              <input
-                id="server"
-                type="text"
-                value={server}
-                onChange={(e) => setServer(e.target.value)}
-                placeholder="Enter server name"
-                disabled={loading}
-              />
-            </div>
-          </div>
-          <div className="button-group">
-            <button type="submit" disabled={loading}>
-              ➕ Add Character
-            </button>
-          </div>
-        </form>
-
-        {characterList.length > 0 && (
-          <div className="character-queue">
-            <h3>📝 Characters to Search ({characterList.length}):</h3>
-            <div className="queue-list">
-              {characterList.map((char, index) => (
-                <div key={index} className="queue-item">
-                  <span className="queue-name">{char.username}</span>
-                  <span className="queue-server">({char.server})</span>
-                  <button 
-                    className="remove-btn"
-                    onClick={() => removeFromList(index)}
-                    title="Remove"
-                    disabled={loading}
-                  >
-                    ×
-                  </button>
+            <div className="preview-grid">
+              {teams.map(team => (
+                <div key={team.id} className="preview-team">
+                  <h3>{team.name}</h3>
+                  <div className="preview-subteams">
+                    {team.subteams.map(subteam => (
+                      <div key={subteam.id} className="preview-subteam">
+                        <div className="preview-subteam-header">
+                          <h4>{subteam.name}</h4>
+                          <span>3 DPS + 1 Support</span>
+                        </div>
+                        <ul className="preview-slot-list">
+                          {subteam.slots.map(slot => {
+                            const occupant = teamAssignments[slot.id]
+                            return (
+                              <li key={slot.id} className={`preview-slot ${slot.role}`}>
+                                <div className="preview-slot-role">{slot.label}</div>
+                                {occupant ? (
+                                  <div className="preview-slot-details">
+                                    <strong>{occupant.name}</strong>
+                                    <span>{occupant.className}</span>
+                                    {showPveScores && <span className="preview-slot-pve">PVE {occupant.pveScore}</span>}
+                                  </div>
+                                ) : (
+                                  <div className="preview-slot-empty">Empty</div>
+                                )}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
-            <div className="button-group" style={{ marginTop: '10px' }}>
-              <button onClick={handleSearch} disabled={loading}>
-                {loading ? 'Searching...' : '🔍 Search All Characters'}
-              </button>
-              <button 
-                className="secondary" 
-                onClick={clearCharacterList}
-                disabled={loading}
-              >
-                Clear List
-              </button>
-            </div>
           </div>
-        )}
-      </div>
-
-      {loading && <div className="loading">Loading character data...</div>}
-
-      {error && <div className="error">❌ Error: {error}</div>}
-
-      {characterDataList.length > 0 && (
-        <div className="results-section">
-          <h2 style={{ marginBottom: '10px', color: '#333', fontSize: '1rem' }}>
-            📊 Results ({characterDataList.length} character{characterDataList.length > 1 ? 's' : ''})
-          </h2>
-          {characterDataList.map((charData, index) => {
-            const details = extractCharacterDetails(charData)
-            return (
-              <div key={index} className={`character-card ${details.error ? 'error-card' : ''}`}>
-                <h2>
-                  {details.name}
-                  <span className="server-badge">{details.server}</span>
-                </h2>
-                {details.error ? (
-                  <div className="error" style={{ margin: '10px 0' }}>
-                    ⚠️ {details.error}
-                  </div>
-                ) : (
-                  <div className="character-details">
-                    <div className="detail-item">
-                      <div className="detail-label">Class</div>
-                      <div className="detail-value">{details.className}</div>
-                    </div>
-                    <div className="detail-item">
-                      <div className="detail-label">Item Level</div>
-                      <div className="detail-value">{details.itemLevel}</div>
-                    </div>
-                    <div className="detail-item">
-                      <div className="detail-label">PVE Score</div>
-                      <div className="detail-value">{details.pveScore}</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
         </div>
       )}
     </div>
