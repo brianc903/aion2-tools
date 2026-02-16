@@ -141,10 +141,10 @@ function App() {
   const fetchSingleCharacter = async (name, srv) => {
     const encodedName = encodeURIComponent(name)
     const encodedServer = encodeURIComponent(srv)
-    const url = `https://aion-api.bnshive.com/character/query?name=${encodedName}&server=${encodedServer}`
-    
-    const response = await fetch(url)
-    
+    const apiUrl = `https://aion-api.bnshive.com/character/query?name=${encodedName}&server=${encodedServer}`
+
+    const response = await fetch(apiUrl)
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
