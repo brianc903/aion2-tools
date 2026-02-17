@@ -19,6 +19,7 @@ A React + Vite + Electron experience for searching Aion2 characters, building we
 2. Click **➕ Add Character** to queue the cleaned list.
 3. Use **🔍 Search All Characters** to fetch them in parallel. Results appear sorted by PVE score.
 4. Saved searches record the last 100 `(name, server)` pairs. Click a pill to rehydrate the inputs or remove/clear as needed.
+5. Re-run searches anytime; new results merge into the existing roster so Dungeon Team assignments stay intact until you clear them.
 
 ### Dungeon Teams Tab
 1. Run a search first so the roster has data.

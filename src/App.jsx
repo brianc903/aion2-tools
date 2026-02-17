@@ -142,6 +142,31 @@ const buildAssignmentsFromTeams = (teamList) => {
   return slots
 }
 
+const toKeyPart = (value) => (value || '').toString().trim().toLowerCase()
+
+const buildRosterKey = (entry) => {
+  if (!entry) {
+    return 'unknown::'
+  }
+  const name = entry.searchedName || entry.queryResult?.data?.profile?.name || entry.id || ''
+  const server = entry.searchedServer || entry.queryResult?.data?.profile?.serverName || ''
+  return `${toKeyPart(name)}::${toKeyPart(server)}`
+}
+
+const mergeCharacterResults = (existingList, newList) => {
+  const map = new Map()
+  existingList.forEach(entry => {
+    map.set(buildRosterKey(entry), entry)
+  })
+  newList.forEach(entry => {
+    if (!entry) {
+      return
+    }
+    map.set(buildRosterKey(entry), entry)
+  })
+  return Array.from(map.values())
+}
+
 function App() {
   const weekWindow = useMemo(() => getUpcomingRaidWindow(), [])
   const [username, setUsername] = useState('')
@@ -267,7 +292,6 @@ function App() {
 
     setLoading(true)
     setError(null)
-    setCharacterDataList([])
     setCharacterList(savedUsernames)
 
     try {
@@ -278,7 +302,7 @@ function App() {
       )
 
       const results = await Promise.all(promises)
-      setCharacterDataList(results)
+      setCharacterDataList(prev => mergeCharacterResults(prev, results))
       
     } catch (err) {
       setError(err.message || 'Failed to fetch character data')
@@ -357,7 +381,6 @@ function App() {
 
     setLoading(true)
     setError(null)
-    setCharacterDataList([])
 
     try {
       // Fetch all characters in parallel
@@ -367,7 +390,7 @@ function App() {
       )
 
       const results = await Promise.all(promises)
-      setCharacterDataList(results)
+      setCharacterDataList(prev => mergeCharacterResults(prev, results))
       
       // Save all usernames to history
       saveMultipleUsernames(characterList)
