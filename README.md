@@ -23,7 +23,7 @@ A React + Vite + Electron experience for searching Aion2 characters, building we
 ### Dungeon Teams Tab
 1. Run a search first so the roster has data.
 2. Drag DPS or Support cards into the desired slot (role restriction enforced).
-3. Use **Hide/Show PVE Scores**, **Add Team**, or **Reset Teams** as needed. Each team always has two subteams (A/B) with 4 slots each.
+3. Use **Hide/Show PVE Scores**, the ↑/↓ controls to reorder teams, **Add Team**, or **Reset Teams** as needed. Each team always has two subteams (A/B) with 4 slots each.
 4. Pick a date (restricted to the upcoming Wed → Tue window) and time for each team using the controls in the card header.
 5. Click **👀 Preview Layout** to display every roster on one page for screenshots/exports. The overlay respects the same PVE visibility toggle.
 

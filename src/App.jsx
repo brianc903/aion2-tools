@@ -603,6 +603,23 @@ function App() {
     setTeamAssignments(buildAssignmentsFromTeams(teams))
   }
 
+  const handleMoveTeam = (teamId, direction) => {
+    setTeams(prevTeams => {
+      const currentIndex = prevTeams.findIndex(team => team.id === teamId)
+      if (currentIndex === -1) {
+        return prevTeams
+      }
+      const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+      if (nextIndex < 0 || nextIndex >= prevTeams.length) {
+        return prevTeams
+      }
+      const updated = [...prevTeams]
+      const [movingTeam] = updated.splice(currentIndex, 1)
+      updated.splice(nextIndex, 0, movingTeam)
+      return updated
+    })
+  }
+
   const handleAddTeam = () => {
     setTeams(prevTeams => {
       const nextIndex = prevTeams.length
@@ -926,21 +943,41 @@ function App() {
               </div>
 
               <div className="teams-panel">
-                {teams.map(team => (
+                {teams.map((team, index) => (
                   <div key={team.id} className="team-card">
                     <div className="team-card-header">
                       <div className="team-card-title">
                         <h3>{team.name}</h3>
-                        {teams.length > 1 && (
-                          <button
-                            className="team-remove"
-                            onClick={() => handleRemoveTeam(team.id)}
-                            disabled={teams.length <= 1}
-                            aria-label={`Remove ${team.name}`}
-                          >
-                            ×
-                          </button>
-                        )}
+                        <div className="team-card-controls">
+                          <div className="team-order-controls">
+                            <button
+                              className="team-order-btn"
+                              onClick={() => handleMoveTeam(team.id, 'up')}
+                              disabled={index === 0}
+                              aria-label={`Move ${team.name} up`}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              className="team-order-btn"
+                              onClick={() => handleMoveTeam(team.id, 'down')}
+                              disabled={index === teams.length - 1}
+                              aria-label={`Move ${team.name} down`}
+                            >
+                              ↓
+                            </button>
+                          </div>
+                          {teams.length > 1 && (
+                            <button
+                              className="team-remove"
+                              onClick={() => handleRemoveTeam(team.id)}
+                              disabled={teams.length <= 1}
+                              aria-label={`Remove ${team.name}`}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="team-card-meta">
                         <span>8 slots • 2 sub-teams</span>
