@@ -1,7 +1,7 @@
 {
   "name": "aion2-tools",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "homepage": "https://brianc903.github.io/aion2-tools",
   "type": "module",
   "main": "dist-electron/main.js",
