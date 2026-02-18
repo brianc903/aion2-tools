@@ -142,6 +142,16 @@ const initializeTeamTimes = (teamList, defaultTime) => {
   return map
 }
 
+const initializeSubteamModes = (teamList) => {
+  const map = {}
+  teamList.forEach(team => {
+    team.subteams.forEach(subteam => {
+      map[subteam.id] = false
+    })
+  })
+  return map
+}
+
 const buildAssignmentsFromTeams = (teamList) => {
   const slots = {}
   teamList.forEach(team => {
@@ -194,6 +204,7 @@ function App() {
   const [teamSchedules, setTeamSchedules] = useState(() => initializeTeamSchedules(initialTeams, weekWindow.startInput))
   const [teamTimes, setTeamTimes] = useState(() => initializeTeamTimes(initialTeams, DEFAULT_TEAM_TIME))
   const [teamAssignments, setTeamAssignments] = useState(() => buildAssignmentsFromTeams(initialTeams))
+  const [subteamFourDpsMode, setSubteamFourDpsMode] = useState(() => initializeSubteamModes(initialTeams))
   const [showPveScores, setShowPveScores] = useState(true)
   const [showPreview, setShowPreview] = useState(false)
   const windowLabel = useMemo(() => {
@@ -206,8 +217,12 @@ function App() {
     teams.forEach(team => {
       stats[team.id] = {}
       team.subteams.forEach(subteam => {
+        const usesFourDps = Boolean(subteamFourDpsMode[subteam.id])
         const dpsMembers = subteam.slots
-          .filter(slot => slot.role === 'dps')
+          .filter(slot => {
+            const effectiveRole = usesFourDps && slot.role === 'support' ? 'dps' : slot.role
+            return effectiveRole === 'dps'
+          })
           .map(slot => teamAssignments[slot.id])
           .filter(member => {
             if (!member) {
@@ -231,7 +246,7 @@ function App() {
       })
     })
     return stats
-  }, [teams, teamAssignments])
+  }, [teams, teamAssignments, subteamFourDpsMode])
 
   // Load saved usernames from localStorage on mount
   useEffect(() => {
@@ -546,16 +561,24 @@ function App() {
     draggingMemberRef.current = null
   }
 
-  const handleDragOver = (event, slotRole) => {
+  const resolveSlotRole = (subteamId, slotRole) => {
+    if (!subteamId) {
+      return slotRole
+    }
+    return subteamFourDpsMode[subteamId] && slotRole === 'support' ? 'dps' : slotRole
+  }
+
+  const handleDragOver = (event, slotRole, subteamId) => {
     const member = draggingMemberRef.current
-    if (!member || member.role !== slotRole) {
+    const effectiveRole = resolveSlotRole(subteamId, slotRole)
+    if (!member || member.role !== effectiveRole) {
       return
     }
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }
 
-  const handleDrop = (event, slotId, slotRole) => {
+  const handleDrop = (event, slotId, slotRole, subteamId) => {
     const draggedMember = draggingMemberRef.current
     const payload = event.dataTransfer.getData('application/json')
     let parsedMember = draggedMember
@@ -569,7 +592,9 @@ function App() {
       }
     }
 
-    if (!parsedMember || parsedMember.role !== slotRole) {
+    const effectiveRole = resolveSlotRole(subteamId, slotRole)
+
+    if (!parsedMember || parsedMember.role !== effectiveRole) {
       return
     }
 
@@ -638,6 +663,42 @@ function App() {
     setTeamAssignments(buildAssignmentsFromTeams(teams))
   }
 
+  const handleToggleSubteamMode = (subteamId) => {
+    const nextValue = !subteamFourDpsMode[subteamId]
+    setSubteamFourDpsMode(prev => ({
+      ...prev,
+      [subteamId]: nextValue
+    }))
+
+    if (!nextValue) {
+      setTeamAssignments(prev => {
+        let targetSubteam = null
+        for (const team of teams) {
+          const match = team.subteams.find(subteam => subteam.id === subteamId)
+          if (match) {
+            targetSubteam = match
+            break
+          }
+        }
+        if (!targetSubteam) {
+          return prev
+        }
+        let changed = false
+        const updated = { ...prev }
+        targetSubteam.slots.forEach(slot => {
+          if (slot.role === 'support') {
+            const occupant = updated[slot.id]
+            if (occupant && occupant.role !== 'support') {
+              updated[slot.id] = null
+              changed = true
+            }
+          }
+        })
+        return changed ? updated : prev
+      })
+    }
+  }
+
   const handleMoveTeam = (teamId, direction) => {
     setTeams(prevTeams => {
       const currentIndex = prevTeams.findIndex(team => team.id === teamId)
@@ -672,6 +733,13 @@ function App() {
         ...prevTimes,
         [newTeam.id]: DEFAULT_TEAM_TIME
       }))
+      setSubteamFourDpsMode(prevModes => {
+        const nextModes = { ...prevModes }
+        newTeam.subteams.forEach(subteam => {
+          nextModes[subteam.id] = false
+        })
+        return nextModes
+      })
       return [...prevTeams, newTeam]
     })
   }
@@ -704,6 +772,13 @@ function App() {
     setTeamTimes(prev => {
       const updated = { ...prev }
       delete updated[teamId]
+      return updated
+    })
+    setSubteamFourDpsMode(prev => {
+      const updated = { ...prev }
+      teamToRemove.subteams.forEach(subteam => {
+        delete updated[subteam.id]
+      })
       return updated
     })
   }
@@ -890,7 +965,7 @@ function App() {
             <div>
               <h2>🛡️ Weekly Dungeon Planner</h2>
               <p className="team-hint">
-                Drag characters into each slot. Every squad needs 3 DPS and 1 治癒星 support.
+                Drag characters into each slot. Every subteam defaults to 3 DPS + 1 治癒星, but you can toggle 4 DPS layouts as needed.
               </p>
               <p className="team-window-note">
                 Upcoming window: {windowLabel} (Wed → Tue only)
@@ -1042,14 +1117,21 @@ function App() {
                     <div className="subteam-grid">
                       {team.subteams.map(subteam => {
                         const stats = teamStats[team.id]?.[subteam.id] || { average: null }
+                        const usesFourDps = Boolean(subteamFourDpsMode[subteam.id])
                         return (
                           <div key={subteam.id} className="subteam-card">
                             <div className="subteam-header">
                               <div className="subteam-title">
                                 <h4>{subteam.name}</h4>
+                                <button
+                                  className={`subteam-mode-toggle ${usesFourDps ? 'active' : ''}`}
+                                  onClick={() => handleToggleSubteamMode(subteam.id)}
+                                  aria-pressed={usesFourDps}
+                                >
+                                  {usesFourDps ? '4 DPS' : '3 DPS + 1 治癒星'}
+                                </button>
                               </div>
                               <div className="subteam-meta">
-                                <span>3 DPS + 1 Support</span>
                                 {showPveScores && (
                                   <span className="team-avg">
                                     Avg DPS PVE: {stats.average !== null ? Math.round(stats.average).toLocaleString() : '--'}
@@ -1060,12 +1142,14 @@ function App() {
                             <div className="slot-grid">
                               {subteam.slots.map(slot => {
                                 const occupant = teamAssignments[slot.id]
+                                const effectiveRole = resolveSlotRole(subteam.id, slot.role)
+                                const slotLabel = usesFourDps && slot.role === 'support' ? 'DPS 4' : slot.label
                                 return (
                                   <div
                                     key={slot.id}
-                                    className={`team-slot ${slot.role} ${occupant ? 'filled' : ''}`}
-                                    onDragOver={(event) => handleDragOver(event, slot.role)}
-                                    onDrop={(event) => handleDrop(event, slot.id, slot.role)}
+                                    className={`team-slot ${effectiveRole} ${occupant ? 'filled' : ''}`}
+                                    onDragOver={(event) => handleDragOver(event, slot.role, subteam.id)}
+                                    onDrop={(event) => handleDrop(event, slot.id, slot.role, subteam.id)}
                                   >
                                     {occupant ? (
                                       <div
@@ -1092,8 +1176,8 @@ function App() {
                                       </div>
                                     ) : (
                                       <div className="slot-placeholder">
-                                        {slot.label}
-                                        <span className="slot-role-label">{slot.role === 'support' ? 'Support' : 'DPS'}</span>
+                                        {slotLabel}
+                                        <span className="slot-role-label">{effectiveRole === 'support' ? 'Support' : 'DPS'}</span>
                                       </div>
                                     )}
                                   </div>
@@ -1133,35 +1217,40 @@ function App() {
                     <span className="preview-team-date">{formatDisplayDateTime(teamSchedules[team.id], teamTimes[team.id])}</span>
                   </div>
                   <div className="preview-subteams">
-                    {team.subteams.map(subteam => (
-                      <div key={subteam.id} className="preview-subteam">
-                        <div className="preview-subteam-header">
-                          <h4>{subteam.name}</h4>
-                          <span>3 DPS + 1 Support</span>
+                    {team.subteams.map(subteam => {
+                      const usesFourDps = Boolean(subteamFourDpsMode[subteam.id])
+                      return (
+                        <div key={subteam.id} className="preview-subteam">
+                          <div className="preview-subteam-header">
+                            <h4>{subteam.name}</h4>
+                            <span>{usesFourDps ? '4 DPS' : '3 DPS + 1 治癒星'}</span>
+                          </div>
+                          <ul className="preview-slot-list">
+                            {subteam.slots.map(slot => {
+                              const occupant = teamAssignments[slot.id]
+                              const effectiveRole = resolveSlotRole(subteam.id, slot.role)
+                              const slotLabel = usesFourDps && slot.role === 'support' ? 'DPS 4' : slot.label
+                              return (
+                                <li key={slot.id} className={`preview-slot ${effectiveRole}`}>
+                                  <div className="preview-slot-role">{slotLabel}</div>
+                                  {occupant ? (
+                                    <div className="preview-slot-details">
+                                      <strong>{occupant.name}</strong>
+                                      <span>{occupant.className}</span>
+                                      {showPveScores && (
+                                        <span className="preview-slot-pve">PVE {formatPveScoreDisplay(occupant.pveScore)}</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="preview-slot-empty">Empty</div>
+                                  )}
+                                </li>
+                              )
+                            })}
+                          </ul>
                         </div>
-                        <ul className="preview-slot-list">
-                          {subteam.slots.map(slot => {
-                            const occupant = teamAssignments[slot.id]
-                            return (
-                              <li key={slot.id} className={`preview-slot ${slot.role}`}>
-                                <div className="preview-slot-role">{slot.label}</div>
-                                {occupant ? (
-                                  <div className="preview-slot-details">
-                                    <strong>{occupant.name}</strong>
-                                    <span>{occupant.className}</span>
-                                    {showPveScores && (
-                                      <span className="preview-slot-pve">PVE {formatPveScoreDisplay(occupant.pveScore)}</span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="preview-slot-empty">Empty</div>
-                                )}
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               ))}

@@ -320,6 +320,33 @@ button.secondary:hover {
   gap: 4px;
 }
 
+.subteam-mode-toggle {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #e0e7ff;
+  color: #1d1d4f;
+  border: 1px solid #c7d2fe;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.subteam-mode-toggle:hover {
+  background: #cbd5ff;
+  box-shadow: 0 4px 10px rgba(99, 102, 241, 0.25);
+}
+
+.subteam-mode-toggle.active {
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+  color: #fff;
+  border-color: #4338ca;
+}
+
+.subteam-mode-toggle.active:hover {
+  box-shadow: 0 6px 18px rgba(67, 56, 202, 0.35);
+}
+
 .team-order-btn {
   width: 28px;
   height: 28px;
