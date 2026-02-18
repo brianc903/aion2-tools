@@ -61,6 +61,18 @@ const toNumericScore = (value) => {
   return NaN
 }
 
+const formatPveScoreDisplay = (value) => {
+  const numeric = toNumericScore(value)
+  if (Number.isNaN(numeric)) {
+    return value ?? 'N/A'
+  }
+  const rounded = Math.round(numeric * 10) / 10
+  return rounded.toLocaleString(undefined, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  })
+}
+
 const parseCharacterNames = (raw) => {
   if (!raw || !raw.trim()) {
     return []
@@ -927,7 +939,7 @@ function App() {
                         <div className="roster-name">{member.name}</div>
                         <div className="roster-meta">
                           <span>{member.className}</span>
-                          {showPveScores && <span>PVE {member.pveScore}</span>}
+                          {showPveScores && <span>PVE {formatPveScoreDisplay(member.pveScore)}</span>}
                         </div>
                       </div>
                     ))}
@@ -954,7 +966,7 @@ function App() {
                         <div className="roster-name">{member.name}</div>
                         <div className="roster-meta">
                           <span>{member.className}</span>
-                          {showPveScores && <span>PVE {member.pveScore}</span>}
+                          {showPveScores && <span>PVE {formatPveScoreDisplay(member.pveScore)}</span>}
                         </div>
                       </div>
                     ))}
@@ -1065,7 +1077,7 @@ function App() {
                                         <div className="slot-name">{occupant.name}</div>
                                         <div className="slot-meta">
                                           <span>{occupant.className}</span>
-                                          {showPveScores && <span>PVE {occupant.pveScore}</span>}
+                                          {showPveScores && <span>PVE {formatPveScoreDisplay(occupant.pveScore)}</span>}
                                         </div>
                                         <button
                                           className="slot-remove"
@@ -1137,7 +1149,9 @@ function App() {
                                   <div className="preview-slot-details">
                                     <strong>{occupant.name}</strong>
                                     <span>{occupant.className}</span>
-                                    {showPveScores && <span className="preview-slot-pve">PVE {occupant.pveScore}</span>}
+                                    {showPveScores && (
+                                      <span className="preview-slot-pve">PVE {formatPveScoreDisplay(occupant.pveScore)}</span>
+                                    )}
                                   </div>
                                 ) : (
                                   <div className="preview-slot-empty">Empty</div>
